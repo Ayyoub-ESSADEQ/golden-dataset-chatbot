@@ -1,9 +1,11 @@
 from langchain_community.document_loaders.csv_loader import CSVLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
 from langchain_community.llms.llamafile import Llamafile
-from langchain.chains import RetrievalQA
+from langchain_chroma import Chroma
+from langchain.chains import create_retrieval_chain
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.prompts import ChatPromptTemplate
 
 file_path = "./data/constituents-financials.csv"
 
@@ -21,22 +23,48 @@ embeddings = HuggingFaceEmbeddings(
     model_name="sentence-transformers/all-mpnet-base-v2",
 )
 
-vector_store = FAISS.from_documents(texts, embeddings)
-vector_store_retriever = vector_store.from_documents(
+
+vector_store = Chroma.from_documents(
     documents=texts,
     embedding=embeddings,
+    collection_name="companies_data_collection",
+    persist_directory="./chroma",
 )
 
-tiny_llama_llm = Llamafile()
+retriever = vector_store.as_retriever(
+    search_type="similarity",
+    search_kwargs={"k": 6},
+)
 
-retriever_dict = {
-    "model_type": "FAISS",
-    "input_value": vector_store_retriever,
-    "input_type": "FAISS",
-}
+tiny_llama_model = Llamafile()
 
-qa_chain = RetrievalQA.from_llm(llm=tiny_llama_llm, retriever=retriever_dict)
+system_prompt = (
+    "You are an assistant for question-answering tasks. "
+    "Use the following pieces of retrieved context to answer "
+    "the question. If you don't know the answer, say that you "
+    "don't know. Use three sentences maximum and keep the "
+    "answer concise."
+    "\n\n"
+    "{context}"
+)
 
-question = "What is the price for Aetna Inc ?"
-result = qa_chain({"query": question})
-print(result["result"])
+prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", system_prompt),
+        ("human", "{input}"),
+    ]
+)
+
+question_answer_chain = create_stuff_documents_chain(
+    llm=tiny_llama_model,
+    prompt=prompt,
+)
+
+rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+response = rag_chain.invoke(
+    {
+        "input": "What is the sector on which Aetna Inc operates ?",
+    }
+)
+
+print(response["answer"])
