@@ -118,3 +118,4 @@ poetry.toml
 
 pyrightconfig.json
 models/TinyLlama-1.1B-Chat-v1.0.F16.*
+chroma
